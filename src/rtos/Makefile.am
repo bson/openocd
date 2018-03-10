@@ -7,9 +7,11 @@ noinst_LTLIBRARIES += %D%/librtos.la
 	%D%/rtos_embkernel_stackings.c \
 	%D%/rtos_mqx_stackings.c \
 	%D%/rtos_ucos_iii_stackings.c \
+	%D%/rtos_enetcore_stackings.c \
 	%D%/FreeRTOS.c \
 	%D%/ThreadX.c \
 	%D%/eCos.c \
+	%D%/enetcore.c \
 	%D%/linux.c \
 	%D%/ChibiOS.c \
 	%D%/embKernel.c \
@@ -18,6 +20,7 @@ noinst_LTLIBRARIES += %D%/librtos.la
 	%D%/rtos.h \
 	%D%/rtos_standard_stackings.h \
 	%D%/rtos_ecos_stackings.h \
+	%D%/rtos_enetcore_stackings.h \
 	%D%/linux_header.h \
 	%D%/rtos_chibios_stackings.h \
 	%D%/rtos_embkernel_stackings.h \
