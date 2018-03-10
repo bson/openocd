@@ -198,12 +198,12 @@ static int enetcore_update_threads(struct rtos *rtos)
                                     param->pointer_width,
                                     (uint8_t *)&name_ptr);
         
-		if (retval != ERROR_OK) {
-			LOG_ERROR("Could not read enetcore thread name pointer from target");
-			return retval;
-		}
+        if (retval != ERROR_OK) {
+            LOG_ERROR("Could not read enetcore thread name pointer from target");
+            return retval;
+        }
 
-		/* Read the thread name */
+        /* Read the thread name */
         if (name_ptr) {
             retval = target_read_buffer(rtos->target,
                                         name_ptr,
@@ -217,57 +217,57 @@ static int enetcore_update_threads(struct rtos *rtos)
 
             tmp_str[THREAD_NAME_STR_SIZE-1] = 0;
         } else {
-			strcpy(tmp_str, "(null)");
+            strcpy(tmp_str, "(null)");
         }
 
-		rtos->thread_details[nthread].thread_name_str = malloc(strlen(tmp_str)+1);
-		strcpy(rtos->thread_details[nthread].thread_name_str, tmp_str);
+        rtos->thread_details[nthread].thread_name_str = malloc(strlen(tmp_str)+1);
+        strcpy(rtos->thread_details[nthread].thread_name_str, tmp_str);
 
-		/* Read the thread status */
-		uint8_t thread_status = 0;
-		retval = target_read_buffer(rtos->target,
+        /* Read the thread status */
+        uint8_t thread_status = 0;
+        retval = target_read_buffer(rtos->target,
                                     thread_base + param->thread_state_offset,
                                     1,
                                     (uint8_t *)&thread_status);
         
-		if (retval != ERROR_OK) {
-			LOG_ERROR("Error reading thread state from enetcore target");
-			return retval;
-		}
+        if (retval != ERROR_OK) {
+            LOG_ERROR("Error reading thread state from enetcore target");
+            return retval;
+        }
 
         const char *state_desc = "(corrupt)";
         if (thread_status < ENETCORE_NUM_STATES) {
-			state_desc = enetcore_thread_states[thread_status].desc;
+            state_desc = enetcore_thread_states[thread_status].desc;
         }
 
-		rtos->thread_details[nthread].extra_info_str = malloc(strlen(state_desc)+8);
-		sprintf(rtos->thread_details[nthread].extra_info_str, "State: %s", state_desc);
+        rtos->thread_details[nthread].extra_info_str = malloc(strlen(state_desc)+8);
+        sprintf(rtos->thread_details[nthread].extra_info_str, "State: %s", state_desc);
 
-		rtos->thread_details[nthread].exists = true;
+        rtos->thread_details[nthread].exists = true;
     }
 
-	rtos->thread_count = thread_num;
+    rtos->thread_count = thread_num;
 
-	return 0;
+    return 0;
 }
 
 static int enetcore_get_thread_reg_list(struct rtos *rtos, int64_t thread_id, char **hex_reg_list)
 {
-	int retval;
-	const struct enetcore_params *param;
+    int retval;
+    const struct enetcore_params *param;
 
-	*hex_reg_list = NULL;
+    *hex_reg_list = NULL;
 
-	if (rtos == NULL)
-		return -1;
+    if (rtos == NULL)
+        return -1;
 
-	if (thread_id == 0)
-		return -2;
+    if (thread_id == 0)
+        return -2;
 
-	if (rtos->rtos_specific_params == NULL)
-		return -3;
+    if (rtos->rtos_specific_params == NULL)
+        return -3;
 
-	param = (const struct enetcore_params*)rtos->rtos_specific_params;
+    param = (const struct enetcore_params*)rtos->rtos_specific_params;
 
     uint32_t thread_q = rtos->symbols[enetcore_VAL_runq].address;
 
