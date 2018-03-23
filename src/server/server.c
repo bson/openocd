@@ -259,7 +259,7 @@ int add_service(char *name,
 		c->sin.sin_family = AF_INET;
 
 		if (bindto_name == NULL)
-			c->sin.sin_addr.s_addr = INADDR_ANY;
+			c->sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 		else {
 			hp = gethostbyname(bindto_name);
 			if (hp == NULL) {
@@ -639,6 +639,13 @@ int server_quit(void)
 
 	/* return signal number so we can kill ourselves */
 	return last_signal;
+}
+
+void server_free(void)
+{
+	tcl_service_free();
+	telnet_service_free();
+	jsp_service_free();
 }
 
 void exit_on_signal(int sig)

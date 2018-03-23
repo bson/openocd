@@ -732,7 +732,6 @@ static void gdb_signal_reply(struct target *target, struct connection *connectio
 	} else {
 		if (gdb_connection->ctrl_c) {
 			signal_var = 0x2;
-			gdb_connection->ctrl_c = 0;
 		} else
 			signal_var = gdb_last_signal(target);
 
@@ -769,11 +768,14 @@ static void gdb_signal_reply(struct target *target, struct connection *connectio
 					target->rtos->current_thread);
 			target->rtos->current_threadid = target->rtos->current_thread;
 			target->rtos->gdb_target_for_threadid(connection, target->rtos->current_threadid, &ct);
-			signal_var = gdb_last_signal(ct);
+			if (!gdb_connection->ctrl_c)
+				signal_var = gdb_last_signal(ct);
 		}
 
 		sig_reply_len = snprintf(sig_reply, sizeof(sig_reply), "T%2.2x%s%s",
 				signal_var, stop_reason, current_thread);
+
+		gdb_connection->ctrl_c = 0;
 	}
 
 	gdb_put_packet(connection, sig_reply, sig_reply_len);
@@ -2442,7 +2444,11 @@ static int gdb_get_thread_list_chunk(struct target *target, char **thread_list,
 	else
 		transfer_type = 'l';
 
-	*chunk = malloc(length + 2);
+	*chunk = malloc(length + 2 + 3);
+    /* Allocating extra 3 bytes prevents false positive valgrind report
+	 * of strlen(chunk) word access:
+	 * Invalid read of size 4
+	 * Address 0x4479934 is 44 bytes inside a block of size 45 alloc'd */
 	if (*chunk == NULL) {
 		LOG_ERROR("Unable to allocate memory");
 		return ERROR_FAIL;
@@ -2689,6 +2695,8 @@ static bool gdb_handle_vcont_packet(struct connection *connection, const char *p
 
 	/* single-step or step-over-breakpoint */
 	if (parse[0] == 's') {
+		bool fake_step = false;
+
 		if (strncmp(parse, "s:", 2) == 0) {
 			struct target *ct = target;
 			int current_pc = 1;
@@ -2704,8 +2712,19 @@ static bool gdb_handle_vcont_packet(struct connection *connection, const char *p
 				parse = endp;
 			}
 
-			if (target->rtos != NULL)
+			if (target->rtos != NULL) {
+				/* FIXME: why is this necessary? rtos state should be up-to-date here already! */
+				rtos_update_threads(target);
+
 				target->rtos->gdb_target_for_threadid(connection, thread_id, &ct);
+
+				/*
+				 * check if the thread to be stepped is the current rtos thread
+				 * if not, we must fake the step
+				 */
+				if (target->rtos->current_thread != thread_id)
+					fake_step = true;
+			}
 
 			if (parse[0] == ';') {
 				++parse;
@@ -2740,9 +2759,32 @@ static bool gdb_handle_vcont_packet(struct connection *connection, const char *p
 				}
 			}
 
-			LOG_DEBUG("target %s single-step thread %"PRId64, target_name(ct), thread_id);
+			LOG_DEBUG("target %s single-step thread %"PRIx64, target_name(ct), thread_id);
 			log_add_callback(gdb_log_callback, connection);
 			target_call_event_callbacks(ct, TARGET_EVENT_GDB_START);
+
+			/*
+			 * work around an annoying gdb behaviour: when the current thread
+			 * is changed in gdb, it assumes that the target can follow and also
+			 * make the thread current. This is an assumption that cannot hold
+			 * for a real target running a multi-threading OS. We just fake
+			 * the step to not trigger an internal error in gdb. See
+			 * https://sourceware.org/bugzilla/show_bug.cgi?id=22925 for details
+			 */
+			if (fake_step) {
+				int sig_reply_len;
+				char sig_reply[128];
+
+				LOG_DEBUG("fake step thread %"PRIx64, thread_id);
+
+				sig_reply_len = snprintf(sig_reply, sizeof(sig_reply),
+										 "T05thread:%016"PRIx64";", thread_id);
+
+				gdb_put_packet(connection, sig_reply, sig_reply_len);
+				log_remove_callback(gdb_log_callback, connection);
+
+				return true;
+			}
 
 			/* support for gdb_sync command */
 			if (gdb_connection->sync) {
@@ -3571,4 +3613,10 @@ int gdb_register_commands(struct command_context *cmd_ctx)
 	gdb_port = strdup("3333");
 	gdb_port_next = strdup("3333");
 	return register_commands(cmd_ctx, NULL, gdb_command_handlers);
+}
+
+void gdb_service_free(void)
+{
+	free(gdb_port);
+	free(gdb_port_next);
 }
