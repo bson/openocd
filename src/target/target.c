@@ -54,6 +54,7 @@
 #include "image.h"
 #include "rtos/rtos.h"
 #include "transport/transport.h"
+#include "arm_cti.h"
 
 /* default halt wait timeout (ms) */
 #define DEFAULT_HALT_TIMEOUT 5000
@@ -1892,6 +1893,8 @@ static void target_destroy(struct target *target)
 	if (target->type->deinit_target)
 		target->type->deinit_target(target);
 
+	jtag_unregister_event_callback(jtag_enable_callback, target);
+
 	struct target_event_action *teap = target->event_action;
 	while (teap) {
 		struct target_event_action *next = teap->next;
@@ -1905,6 +1908,18 @@ static void target_destroy(struct target *target)
 	if (target->working_areas) {
 		free(target->working_areas->backup);
 		free(target->working_areas);
+	}
+
+	/* release the targets SMP list */
+	if (target->smp) {
+		struct target_list *head = target->head;
+		while (head != NULL) {
+			struct target_list *pos = head->next;
+			head->target->smp = 0;
+			free(head);
+			head = pos;
+		}
+		target->smp = 0;
 	}
 
 	free(target->type);
@@ -2236,21 +2251,19 @@ int target_checksum_memory(struct target *target, target_addr_t address, uint32_
 	return retval;
 }
 
-int target_blank_check_memory(struct target *target, target_addr_t address, uint32_t size, uint32_t* blank,
+int target_blank_check_memory(struct target *target,
+	struct target_memory_check_block *blocks, int num_blocks,
 	uint8_t erased_value)
 {
-	int retval;
 	if (!target_was_examined(target)) {
 		LOG_ERROR("Target not examined yet");
 		return ERROR_FAIL;
 	}
 
-	if (target->type->blank_check_memory == 0)
+	if (target->type->blank_check_memory == NULL)
 		return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
 
-	retval = target->type->blank_check_memory(target, address, size, blank, erased_value);
-
-	return retval;
+	return target->type->blank_check_memory(target, blocks, num_blocks, erased_value);
 }
 
 int target_read_u64(struct target *target, target_addr_t address, uint64_t *value)
@@ -2958,6 +2971,9 @@ COMMAND_HANDLER(handle_halt_command)
 	LOG_DEBUG("-");
 
 	struct target *target = get_current_target(CMD_CTX);
+
+	target->verbose_halt_msg = true;
+
 	int retval = target_halt(target);
 	if (ERROR_OK != retval)
 		return retval;
@@ -4513,7 +4529,6 @@ enum target_cfg_param {
 	TCFG_COREID,
 	TCFG_CHAIN_POSITION,
 	TCFG_DBGBASE,
-	TCFG_CTIBASE,
 	TCFG_RTOS,
 	TCFG_DEFER_EXAMINE,
 };
@@ -4529,7 +4544,6 @@ static Jim_Nvp nvp_config_opts[] = {
 	{ .name = "-coreid",           .value = TCFG_COREID },
 	{ .name = "-chain-position",   .value = TCFG_CHAIN_POSITION },
 	{ .name = "-dbgbase",          .value = TCFG_DBGBASE },
-	{ .name = "-ctibase",          .value = TCFG_CTIBASE },
 	{ .name = "-rtos",             .value = TCFG_RTOS },
 	{ .name = "-defer-examine",    .value = TCFG_DEFER_EXAMINE },
 	{ .name = NULL, .value = -1 }
@@ -4766,6 +4780,13 @@ no_params:
 			if (goi->isconfigure) {
 				Jim_Obj *o_t;
 				struct jtag_tap *tap;
+
+				if (target->has_dap) {
+					Jim_SetResultString(goi->interp,
+						"target requires -dap parameter instead of -chain-position!", -1);
+					return JIM_ERR;
+				}
+
 				target_free_all_working_areas(target);
 				e = Jim_GetOpt_Obj(goi, &o_t);
 				if (e != JIM_OK)
@@ -4773,8 +4794,8 @@ no_params:
 				tap = jtag_tap_by_jim_obj(goi->interp, o_t);
 				if (tap == NULL)
 					return JIM_ERR;
-				/* make this exactly 1 or 0 */
 				target->tap = tap;
+				target->tap_configured = true;
 			} else {
 				if (goi->argc != 0)
 					goto no_params;
@@ -4794,20 +4815,6 @@ no_params:
 					goto no_params;
 			}
 			Jim_SetResult(goi->interp, Jim_NewIntObj(goi->interp, target->dbgbase));
-			/* loop for more */
-			break;
-		case TCFG_CTIBASE:
-			if (goi->isconfigure) {
-				e = Jim_GetOpt_Wide(goi, &w);
-				if (e != JIM_OK)
-					return e;
-				target->ctibase = (uint32_t)w;
-				target->ctibase_set = true;
-			} else {
-				if (goi->argc != 0)
-					goto no_params;
-			}
-			Jim_SetResult(goi->interp, Jim_NewIntObj(goi->interp, target->ctibase));
 			/* loop for more */
 			break;
 		case TCFG_RTOS:
@@ -5587,7 +5594,7 @@ static int target_create(Jim_GetOptInfo *goi)
 	target->next                = NULL;
 	target->arch_info           = NULL;
 
-	target->display             = 1;
+	target->verbose_halt_msg	= true;
 
 	target->halt_issued			= false;
 
@@ -5606,9 +5613,21 @@ static int target_create(Jim_GetOptInfo *goi)
 	goi->isconfigure = 1;
 	e = target_configure(goi, target);
 
-	if (target->tap == NULL) {
-		Jim_SetResultString(goi->interp, "-chain-position required when creating target", -1);
-		e = JIM_ERR;
+	if (e == JIM_OK) {
+		if (target->has_dap) {
+			if (!target->dap_configured) {
+				Jim_SetResultString(goi->interp, "-dap ?name? required when creating target", -1);
+				e = JIM_ERR;
+			}
+		} else {
+			if (!target->tap_configured) {
+				Jim_SetResultString(goi->interp, "-chain-position ?name? required when creating target", -1);
+				e = JIM_ERR;
+			}
+		}
+		/* tap must be set after target was configured */
+		if (target->tap == NULL)
+			e = JIM_ERR;
 	}
 
 	if (e != JIM_OK) {
@@ -5625,14 +5644,23 @@ static int target_create(Jim_GetOptInfo *goi)
 	cp = Jim_GetString(new_cmd, NULL);
 	target->cmd_name = strdup(cp);
 
+	if (target->type->target_create) {
+		e = (*(target->type->target_create))(target, goi->interp);
+		if (e != ERROR_OK) {
+			LOG_DEBUG("target_create failed");
+			free(target->type);
+			free(target->cmd_name);
+			free(target);
+			return JIM_ERR;
+		}
+	}
+
 	/* create the target specific commands */
 	if (target->type->commands) {
 		e = register_commands(cmd_ctx, NULL, target->type->commands);
 		if (ERROR_OK != e)
 			LOG_ERROR("unable to register '%s' commands", cp);
 	}
-	if (target->type->target_create)
-		(*(target->type->target_create))(target, goi->interp);
 
 	/* append to end of list */
 	{

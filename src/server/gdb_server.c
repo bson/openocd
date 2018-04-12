@@ -130,6 +130,9 @@ static int gdb_flash_program = 1;
  * Disabled by default.
  */
 static int gdb_report_data_abort;
+/* If set, errors when accessing registers are reported to gdb. Disabled by
+ * default. */
+static int gdb_report_register_access_error;
 
 /* set if we are sending target descriptions to gdb
  * via qXfer:features:read packet */
@@ -1187,8 +1190,15 @@ static int gdb_get_registers_packet(struct connection *connection,
 	reg_packet_p = reg_packet;
 
 	for (i = 0; i < reg_list_size; i++) {
-		if (!reg_list[i]->valid)
-			reg_list[i]->type->get(reg_list[i]);
+		if (!reg_list[i]->valid) {
+			retval = reg_list[i]->type->get(reg_list[i]);
+			if (retval != ERROR_OK && gdb_report_register_access_error) {
+				LOG_DEBUG("Couldn't get register %s.", reg_list[i]->name);
+				free(reg_packet);
+				free(reg_list);
+				return gdb_error(connection, retval);
+			}
+		}
 		gdb_str_to_target(target, reg_packet_p, reg_list[i]);
 		reg_packet_p += DIV_ROUND_UP(reg_list[i]->size, 8) * 2;
 	}
@@ -1249,7 +1259,13 @@ static int gdb_set_registers_packet(struct connection *connection,
 		bin_buf = malloc(DIV_ROUND_UP(reg_list[i]->size, 8));
 		gdb_target_to_reg(target, packet_p, chars, bin_buf);
 
-		reg_list[i]->type->set(reg_list[i], bin_buf);
+		retval = reg_list[i]->type->set(reg_list[i], bin_buf);
+		if (retval != ERROR_OK && gdb_report_register_access_error) {
+			LOG_DEBUG("Couldn't set register %s.", reg_list[i]->name);
+			free(reg_list);
+			free(bin_buf);
+			return gdb_error(connection, retval);
+		}
 
 		/* advance packet pointer */
 		packet_p += chars;
@@ -1289,8 +1305,14 @@ static int gdb_get_register_packet(struct connection *connection,
 		return ERROR_SERVER_REMOTE_CLOSED;
 	}
 
-	if (!reg_list[reg_num]->valid)
-		reg_list[reg_num]->type->get(reg_list[reg_num]);
+	if (!reg_list[reg_num]->valid) {
+		retval = reg_list[reg_num]->type->get(reg_list[reg_num]);
+		if (retval != ERROR_OK && gdb_report_register_access_error) {
+			LOG_DEBUG("Couldn't get register %s.", reg_list[reg_num]->name);
+			free(reg_list);
+			return gdb_error(connection, retval);
+		}
+	}
 
 	reg_packet = malloc(DIV_ROUND_UP(reg_list[reg_num]->size, 8) * 2 + 1); /* plus one for string termination null */
 
@@ -1344,7 +1366,13 @@ static int gdb_set_register_packet(struct connection *connection,
 
 	gdb_target_to_reg(target, separator + 1, chars, bin_buf);
 
-	reg_list[reg_num]->type->set(reg_list[reg_num], bin_buf);
+	retval = reg_list[reg_num]->type->set(reg_list[reg_num], bin_buf);
+	if (retval != ERROR_OK && gdb_report_register_access_error) {
+		LOG_DEBUG("Couldn't set register %s.", reg_list[reg_num]->name);
+		free(bin_buf);
+		free(reg_list);
+		return gdb_error(connection, retval);
+	}
 
 	gdb_put_packet(connection, "OK", 2);
 
@@ -1780,7 +1808,7 @@ static int gdb_memory_map(struct connection *connection,
 	int offset;
 	int length;
 	char *separator;
-	uint32_t ram_start = 0;
+	target_addr_t ram_start = 0;
 	int i;
 	int target_flash_banks = 0;
 
@@ -1795,9 +1823,6 @@ static int gdb_memory_map(struct connection *connection,
 	/* Sort banks in ascending order.  We need to report non-flash
 	 * memory as ram (or rather read/write) by default for GDB, since
 	 * it has no concept of non-cacheable read/write memory (i/o etc).
-	 *
-	 * FIXME Most non-flash addresses are *NOT* RAM!  Don't lie.
-	 * Current versions of GDB assume unlisted addresses are RAM...
 	 */
 	banks = malloc(sizeof(struct flash_bank *)*flash_get_bank_count());
 
@@ -1820,14 +1845,13 @@ static int gdb_memory_map(struct connection *connection,
 	for (i = 0; i < target_flash_banks; i++) {
 		int j;
 		unsigned sector_size = 0;
-		uint32_t start;
+		unsigned group_len = 0;
 
 		p = banks[i];
-		start = p->base;
 
 		if (ram_start < p->base)
 			xml_printf(&retval, &xml, &pos, &size,
-				"<memory type=\"ram\" start=\"0x%x\" "
+				"<memory type=\"ram\" start=\"" TARGET_ADDR_FMT "\" "
 				"length=\"0x%x\"/>\n",
 				ram_start, p->base - ram_start);
 
@@ -1838,27 +1862,35 @@ static int gdb_memory_map(struct connection *connection,
 		 * regions with 8KB, 32KB, and 64KB sectors; etc.
 		 */
 		for (j = 0; j < p->num_sectors; j++) {
-			unsigned group_len;
 
 			/* Maybe start a new group of sectors. */
 			if (sector_size == 0) {
+				if (p->sectors[j].offset + p->sectors[j].size > p->size) {
+					LOG_WARNING("The flash sector at offset 0x%08" PRIx32
+						" overflows the end of %s bank.",
+						p->sectors[j].offset, p->name);
+					LOG_WARNING("The rest of bank will not show in gdb memory map.");
+					break;
+				}
+				target_addr_t start;
 				start = p->base + p->sectors[j].offset;
 				xml_printf(&retval, &xml, &pos, &size,
 					"<memory type=\"flash\" "
-					"start=\"0x%x\" ",
+					"start=\"" TARGET_ADDR_FMT "\" ",
 					start);
 				sector_size = p->sectors[j].size;
+				group_len = sector_size;
+			} else {
+				group_len += sector_size; /* equal to p->sectors[j].size */
 			}
 
 			/* Does this finish a group of sectors?
 			 * If not, continue an already-started group.
 			 */
-			if (j == p->num_sectors - 1)
-				group_len = (p->base + p->size) - start;
-			else if (p->sectors[j + 1].size != sector_size)
-				group_len = p->base + p->sectors[j + 1].offset
-					- start;
-			else
+			if (j < p->num_sectors - 1
+					&& p->sectors[j + 1].size == sector_size
+					&& p->sectors[j + 1].offset == p->sectors[j].offset + sector_size
+					&& p->sectors[j + 1].offset + p->sectors[j + 1].size <= p->size)
 				continue;
 
 			xml_printf(&retval, &xml, &pos, &size,
@@ -1876,7 +1908,7 @@ static int gdb_memory_map(struct connection *connection,
 
 	if (ram_start != 0)
 		xml_printf(&retval, &xml, &pos, &size,
-			"<memory type=\"ram\" start=\"0x%x\" "
+			"<memory type=\"ram\" start=\"" TARGET_ADDR_FMT "\" "
 			"length=\"0x%x\"/>\n",
 			ram_start, 0-ram_start);
 	/* ELSE a flash chip could be at the very end of the 32 bit address
@@ -1884,11 +1916,11 @@ static int gdb_memory_map(struct connection *connection,
 	 */
 
 	free(banks);
-	banks = NULL;
 
 	xml_printf(&retval, &xml, &pos, &size, "</memory-map>\n");
 
 	if (retval != ERROR_OK) {
+		free(xml);
 		gdb_error(connection, retval);
 		return retval;
 	}
@@ -1909,6 +1941,8 @@ static int gdb_memory_map(struct connection *connection,
 static const char *gdb_get_reg_type_name(enum reg_type type)
 {
 	switch (type) {
+		case REG_TYPE_BOOL:
+			return "bool";
 		case REG_TYPE_INT:
 			return "int";
 		case REG_TYPE_INT8:
@@ -1921,6 +1955,8 @@ static const char *gdb_get_reg_type_name(enum reg_type type)
 			return "int64";
 		case REG_TYPE_INT128:
 			return "int128";
+		case REG_TYPE_UINT:
+			return "uint";
 		case REG_TYPE_UINT8:
 			return "uint8";
 		case REG_TYPE_UINT16:
@@ -2040,9 +2076,9 @@ static int gdb_generate_reg_type_description(struct target *target,
 					type->id, type->reg_type_struct->size);
 			while (field != NULL) {
 				xml_printf(&retval, tdesc, pos, size,
-						"<field name=\"%s\" start=\"%d\" end=\"%d\"/>\n",
-						field->name, field->bitfield->start,
-						field->bitfield->end);
+						"<field name=\"%s\" start=\"%d\" end=\"%d\" type=\"%s\" />\n",
+						field->name, field->bitfield->start, field->bitfield->end,
+						gdb_get_reg_type_name(field->bitfield->type));
 
 				field = field->next;
 			}
@@ -2088,8 +2124,9 @@ static int gdb_generate_reg_type_description(struct target *target,
 		field = type->reg_type_flags->fields;
 		while (field != NULL) {
 			xml_printf(&retval, tdesc, pos, size,
-					"<field name=\"%s\" start=\"%d\" end=\"%d\"/>\n",
-					field->name, field->bitfield->start, field->bitfield->end);
+					"<field name=\"%s\" start=\"%d\" end=\"%d\" type=\"%s\" />\n",
+					field->name, field->bitfield->start, field->bitfield->end,
+					gdb_get_reg_type_name(field->bitfield->type));
 
 			field = field->next;
 		}
@@ -3463,6 +3500,15 @@ COMMAND_HANDLER(handle_gdb_report_data_abort_command)
 	return ERROR_OK;
 }
 
+COMMAND_HANDLER(handle_gdb_report_register_access_error)
+{
+	if (CMD_ARGC != 1)
+		return ERROR_COMMAND_SYNTAX_ERROR;
+
+	COMMAND_PARSE_ENABLE(CMD_ARGV[0], gdb_report_register_access_error);
+	return ERROR_OK;
+}
+
 /* gdb_breakpoint_override */
 COMMAND_HANDLER(handle_gdb_breakpoint_override_command)
 {
@@ -3582,6 +3628,13 @@ static const struct command_registration gdb_command_handlers[] = {
 		.handler = handle_gdb_report_data_abort_command,
 		.mode = COMMAND_CONFIG,
 		.help = "enable or disable reporting data aborts",
+		.usage = "('enable'|'disable')"
+	},
+	{
+		.name = "gdb_report_register_access_error",
+		.handler = handle_gdb_report_register_access_error,
+		.mode = COMMAND_CONFIG,
+		.help = "enable or disable reporting register access errors",
 		.usage = "('enable'|'disable')"
 	},
 	{

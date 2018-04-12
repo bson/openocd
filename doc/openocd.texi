@@ -2200,6 +2200,13 @@ The default behaviour is @option{disable};
 use @option{enable} see these errors reported.
 @end deffn
 
+@deffn {Config Command} gdb_report_register_access_error (@option{enable}|@option{disable})
+Specifies whether register accesses requested by GDB register read/write
+packets report errors or not.
+The default behaviour is @option{disable};
+use @option{enable} see these errors reported.
+@end deffn
+
 @deffn {Config Command} gdb_target_description (@option{enable}|@option{disable})
 Set to @option{enable} to cause OpenOCD to send the target descriptions to gdb via qXfer:features:read packet.
 The default behaviour is @option{enable}.
@@ -3779,6 +3786,11 @@ a TAP doesn't conform to the JTAG specification.
 to verify that instruction scans work correctly.
 Such scans are not used by OpenOCD except to verify that
 there seems to be no problems with JTAG scan chain operations.
+@item @code{-ignore-syspwrupack}
+@*Specify this to ignore the CSYSPWRUPACK bit in the ARM DAP DP CTRL/STAT
+register during initial examination and when checking the sticky error bit.
+This bit is normally checked after setting the CSYSPWRUPREQ bit, but some
+devices do not set the ack bit until sometime later.
 @end itemize
 @end deffn
 
@@ -4002,6 +4014,133 @@ with these TAPs, any targets associated with them, and any on-chip
 resources; then a @file{board.cfg} with off-chip resources, clocking,
 and so forth.
 
+@anchor{dapdeclaration}
+@section DAP declaration (ARMv7 and ARMv8 targets)
+@cindex DAP declaration
+
+Since OpenOCD version 0.11.0, the Debug Access Port (DAP) is
+no longer implicitly created together with the target. It must be
+explicitly declared using the @command{dap create} command. For all
+ARMv7 and ARMv8 targets, the option "@option{-dap} @var{dap_name}" has to be used
+instead of "@option{-chain-position} @var{dotted.name}" when the target is created.
+
+The @command{dap} command group supports the following sub-commands:
+
+@deffn Command {dap create} dap_name @option{-chain-position} dotted.name configparams...
+Declare a DAP instance named @var{dap_name} linked to the JTAG tap
+@var{dotted.name}. This also creates a new command (@command{dap_name})
+which is used for various purposes including additional configuration.
+There can only be one DAP for each JTAG tap in the system.
+
+A DAP may also provide optional @var{configparams}:
+
+@itemize @bullet
+@item @code{-ignore-syspwrupack}
+@*Specify this to ignore the CSYSPWRUPACK bit in the ARM DAP DP CTRL/STAT
+register during initial examination and when checking the sticky error bit.
+This bit is normally checked after setting the CSYSPWRUPREQ bit, but some
+devices do not set the ack bit until sometime later.
+@end itemize
+@end deffn
+
+@deffn Command {dap names}
+This command returns a list of all registered DAP objects. It it useful mainly
+for TCL scripting.
+@end deffn
+
+@deffn Command {dap info} [num]
+Displays the ROM table for MEM-AP @var{num},
+defaulting to the currently selected AP of the currently selected target.
+@end deffn
+
+@deffn Command {dap init}
+Initialize all registered DAPs. This command is used internally
+during initialization. It can be issued at any time after the
+initialization, too.
+@end deffn
+
+The following commands exist as subcommands of DAP instances:
+
+@deffn Command {$dap_name info} [num]
+Displays the ROM table for MEM-AP @var{num},
+defaulting to the currently selected AP.
+@end deffn
+
+@deffn Command {$dap_name apid} [num]
+Displays ID register from AP @var{num}, defaulting to the currently selected AP.
+@end deffn
+
+@anchor{DAP subcommand apreg}
+@deffn Command {$dap_name apreg} ap_num reg [value]
+Displays content of a register @var{reg} from AP @var{ap_num}
+or set a new value @var{value}.
+@var{reg} is byte address of a word register, 0, 4, 8 ... 0xfc.
+@end deffn
+
+@deffn Command {$dap_name apsel} [num]
+Select AP @var{num}, defaulting to 0.
+@end deffn
+
+@deffn Command {$dap_name baseaddr} [num]
+Displays debug base address from MEM-AP @var{num},
+defaulting to the currently selected AP.
+@end deffn
+
+@deffn Command {$dap_name memaccess} [value]
+Displays the number of extra tck cycles in the JTAG idle to use for MEM-AP
+memory bus access [0-255], giving additional time to respond to reads.
+If @var{value} is defined, first assigns that.
+@end deffn
+
+@deffn Command {$dap_name apcsw} [value [mask]]
+Displays or changes CSW bit pattern for MEM-AP transfers.
+
+At the begin of each memory access the CSW pattern is extended (bitwise or-ed)
+by @dfn{Size} and @dfn{AddrInc} bit-fields according to transfer requirements
+and the result is written to the real CSW register. All bits except dynamically
+updated fields @dfn{Size} and @dfn{AddrInc} can be changed by changing
+the CSW pattern. Refer to ARM ADI v5 manual chapter 7.6.4 and appendix A
+for details.
+
+Use @var{value} only syntax if you want to set the new CSW pattern as a whole.
+The example sets HPROT1 bit (required by Cortex-M) and clears the rest of
+the pattern:
+@example
+kx.dap apcsw 0x2000000
+@end example
+
+If @var{mask} is also used, the CSW pattern is changed only on bit positions
+where the mask bit is 1. The following example sets HPROT3 (cacheable)
+and leaves the rest of the pattern intact. It configures memory access through
+DCache on Cortex-M7.
+@example
+set CSW_HPROT3_CACHEABLE [expr 1 << 27]
+samv.dap apcsw $CSW_HPROT3_CACHEABLE $CSW_HPROT3_CACHEABLE
+@end example
+
+Another example clears SPROT bit and leaves the rest of pattern intact:
+@example
+set CSW_SPROT [expr 1 << 30]
+samv.dap apcsw 0 $CSW_SPROT
+@end example
+
+@emph{Note:} If you want to check the real value of CSW, not CSW pattern, use
+@code{xxx.dap apreg 0}. @xref{DAP subcommand apreg,,}.
+
+@emph{Warning:} Some of the CSW bits are vital for working memory transfer.
+If you set a wrong CSW pattern and MEM-AP stopped working, use the following
+example with a proper dap name:
+@example
+xxx.dap apcsw default
+@end example
+@end deffn
+
+@deffn Command {$dap_name ti_be_32_quirks} [@option{enable}]
+Set/get quirks mode for TI TMS450/TMS570 processors
+Disabled by default
+@end deffn
+
+
 @node CPU Configuration
 @chapter CPU Configuration
 @cindex GDB target
@@ -4168,10 +4307,11 @@ to be much more board-specific.
 The key steps you use might look something like this
 
 @example
-target create MyTarget cortex_m -chain-position mychip.cpu
-$MyTarget configure -work-area-phys 0x08000 -work-area-size 8096
-$MyTarget configure -event reset-deassert-pre @{ jtag_rclk 5 @}
-$MyTarget configure -event reset-init @{ myboard_reinit @}
+dap create mychip.dap -chain-position mychip.cpu
+target create MyTarget cortex_m -dap mychip.dap
+MyTarget configure -work-area-phys 0x08000 -work-area-size 8096
+MyTarget configure -event reset-deassert-pre @{ jtag_rclk 5 @}
+MyTarget configure -event reset-init @{ myboard_reinit @}
 @end example
 
 You should specify a working area if you can; typically it uses some
@@ -4221,7 +4361,8 @@ and in other places the target needs to be identified.
 @command{$target_name configure} are permitted.
 If the target is big-endian, set it here with @code{-endian big}.
 
-You @emph{must} set the @code{-chain-position @var{dotted.name}} here.
+You @emph{must} set the @code{-chain-position @var{dotted.name}} or
+@code{-dap @var{dap_name}} here.
 @end itemize
 @end deffn
 
@@ -4239,6 +4380,10 @@ and changing its endianness.
 
 @item @code{-chain-position} @var{dotted.name} -- names the TAP
 used to access this target.
+
+@item @code{-dap} @var{dap_name} -- names the DAP used to access
+this target. @xref{dapdeclaration,,DAP declaration}, on how to
+create and manage DAP instances.
 
 @item @code{-endian} (@option{big}|@option{little}) -- specifies
 whether the CPU uses big or little endian conventions
@@ -4290,9 +4435,11 @@ access the target for debugging.
 Use this option with systems where multiple, independent cores are connected
 to separate access ports of the same DAP.
 
-@item @code{-ctibase} @var{address} -- set base address of Cross-Trigger interface (CTI) connected
-to the target. Currently, only the @code{aarch64} target makes use of this option, where it is
-a mandatory configuration for the target run control.
+@item @code{-cti} @var{cti_name} -- set Cross-Trigger Interface (CTI) connected
+to the target. Currently, only the @code{aarch64} target makes use of this option,
+where it is a mandatory configuration for the target run control.
+@xref{armcrosstrigger,,ARM Cross-Trigger Interface},
+for instruction on how to declare and control a CTI instance.
 @end itemize
 @end deffn
 
@@ -5231,6 +5378,26 @@ at91samd bootloader 16384
 This command releases internal reset held by DSU
 and prepares reset vector catch in case of reset halt.
 Command is used internally in event event reset-deassert-post.
+@end deffn
+
+@deffn Command {at91samd nvmuserrow}
+Writes or reads the entire 64 bit wide NVM user row register which is located at
+0x804000. This register includes various fuses lock-bits and factory calibration
+data. Reading the register is done by invoking this command without any
+arguments. Writing is possible by giving 1 or 2 hex values. The first argument
+is the register value to be written and the second one is an optional changemask.
+Every bit which value in changemask is 0 will stay unchanged. The lock- and
+reserved-bits are masked out and cannot be changed.
+
+@example
+# Read user row
+>at91samd nvmuserrow
+NVMUSERROW: 0xFFFFFC5DD8E0C788
+# Write 0xFFFFFC5DD8E0C788 to user row
+>at91samd nvmuserrow 0xFFFFFC5DD8E0C788
+# Write 0x12300 to user row but leave other bits and low byte unchanged
+>at91samd nvmuserrow 0x12345 0xFFF00
+@end example
 @end deffn
 
 @end deffn
@@ -7781,6 +7948,50 @@ Reports whether the capture clock is locked or not.
 @end deffn
 @end deffn
 
+@anchor{armcrosstrigger}
+@section ARM Cross-Trigger Interface
+@cindex CTI
+
+The ARM Cross-Trigger Interface (CTI) is a generic CoreSight component
+that connects event sources like tracing components or CPU cores with each
+other through a common trigger matrix (CTM). For ARMv8 architecture, a
+CTI is mandatory for core run control and each core has an individual
+CTI instance attached to it. OpenOCD has limited support for CTI using
+the @emph{cti} group of commands.
+
+@deffn Command {cti create} cti_name @option{-dap} dap_name @option{-ap-num} apn @option{-ctibase} base_address
+Creates a CTI instance @var{cti_name} on the DAP instance @var{dap_name} on MEM-AP
+@var{apn}. The @var{base_address} must match the base address of the CTI
+on the respective MEM-AP. All arguments are mandatory. This creates a
+new command @command{$cti_name} which is used for various purposes
+including additional configuration.
+@end deffn
+
+@deffn Command {$cti_name enable} @option{on|off}
+Enable (@option{on}) or disable (@option{off}) the CTI.
+@end deffn
+
+@deffn Command {$cti_name dump}
+Displays a register dump of the CTI.
+@end deffn
+
+@deffn Command {$cti_name write } @var{reg_name} @var{value}
+Write @var{value} to the CTI register with the symbolic name @var{reg_name}.
+@end deffn
+
+@deffn Command {$cti_name read} @var{reg_name}
+Print the value read from the CTI register with the symbolic name @var{reg_name}.
+@end deffn
+
+@deffn Command {$cti_name testmode} @option{on|off}
+Enable (@option{on}) or disable (@option{off}) the integration test mode
+of the CTI.
+@end deffn
+
+@deffn Command {cti names}
+Prints a list of names of all CTI objects created. This command is mainly
+useful in TCL scripting.
+@end deffn
 
 @section Generic ARM
 @cindex ARM
@@ -8259,55 +8470,6 @@ cores @emph{except the ARM1176} use the same six bits.
 @section ARMv7 and ARMv8 Architecture
 @cindex ARMv7
 @cindex ARMv8
-
-@subsection ARMv7 and ARMv8 Debug Access Port (DAP) specific commands
-@cindex Debug Access Port
-@cindex DAP
-These commands are specific to ARM architecture v7 and v8 Debug Access Port (DAP),
-included on Cortex-M and Cortex-A systems.
-They are available in addition to other core-specific commands that may be available.
-
-@deffn Command {dap apid} [num]
-Displays ID register from AP @var{num},
-defaulting to the currently selected AP.
-@end deffn
-
-@deffn Command {dap apreg} ap_num reg [value]
-Displays content of a register @var{reg} from AP @var{ap_num}
-or set a new value @var{value}.
-@var{reg} is byte address of a word register, 0, 4, 8 ... 0xfc.
-@end deffn
-
-@deffn Command {dap apsel} [num]
-Select AP @var{num}, defaulting to 0.
-@end deffn
-
-@deffn Command {dap baseaddr} [num]
-Displays debug base address from MEM-AP @var{num},
-defaulting to the currently selected AP.
-@end deffn
-
-@deffn Command {dap info} [num]
-Displays the ROM table for MEM-AP @var{num},
-defaulting to the currently selected AP.
-@end deffn
-
-@deffn Command {dap memaccess} [value]
-Displays the number of extra tck cycles in the JTAG idle to use for MEM-AP
-memory bus access [0-255], giving additional time to respond to reads.
-If @var{value} is defined, first assigns that.
-@end deffn
-
-@deffn Command {dap apcsw} [0 / 1]
-fix CSW_SPROT from register AP_REG_CSW on selected dap.
-Defaulting to 0.
-@end deffn
-
-@deffn Command {dap ti_be_32_quirks} [@option{enable}]
-Set/get quirks mode for TI TMS450/TMS570 processors
-Disabled by default
-@end deffn
-
 
 @subsection ARMv7-A specific commands
 @cindex Cortex-A

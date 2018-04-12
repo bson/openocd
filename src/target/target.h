@@ -176,20 +176,21 @@ struct target {
 	void *private_config;				/* pointer to target specific config data (for jim_configure hook) */
 	struct target *next;				/* next target in list */
 
-	int display;						/* display async info in telnet session. Do not display
+	bool verbose_halt_msg;				/* display async info in telnet session. Do not display
 										 * lots of halted/resumed info when stepping in debugger. */
 	bool halt_issued;					/* did we transition to halted state? */
 	int64_t halt_issued_time;			/* Note time when halt was issued */
 
+										/* ARM v7/v8 targets with ADIv5 interface */
 	bool dbgbase_set;					/* By default the debug base is not set */
 	uint32_t dbgbase;					/* Really a Cortex-A specific option, but there is no
 										 * system in place to support target specific options
 										 * currently. */
+	bool has_dap;						/* set to true if target has ADIv5 support */
+	bool dap_configured;				/* set to true if ADIv5 DAP is configured */
+	bool tap_configured;				/* set to true if JTAG tap has been configured
+										 * through -chain-position */
 
-	 bool ctibase_set;					 /* By default the debug base is not set */
-	 uint32_t ctibase;					 /* Really a Cortex-A specific option, but there is no
-										  * system in place to support target specific options
-										  * currently. */
 	struct rtos *rtos;					/* Instance of Real Time Operating System support */
 	bool rtos_auto_detect;				/* A flag that indicates that the RTOS has been specified as "auto"
 										 * and must be detected when symbols are offered */
@@ -309,6 +310,12 @@ struct target_timer_callback {
 	struct timeval when;
 	void *priv;
 	struct target_timer_callback *next;
+};
+
+struct target_memory_check_block {
+	target_addr_t address;
+	uint32_t size;
+	uint32_t result;
 };
 
 int target_register_commands(struct command_context *cmd_ctx);
@@ -584,7 +591,8 @@ int target_read_buffer(struct target *target,
 int target_checksum_memory(struct target *target,
 		target_addr_t address, uint32_t size, uint32_t *crc);
 int target_blank_check_memory(struct target *target,
-		target_addr_t address, uint32_t size, uint32_t *blank, uint8_t erased_value);
+		struct target_memory_check_block *blocks, int num_blocks,
+		uint8_t erased_value);
 int target_wait_state(struct target *target, enum target_state state, int ms);
 
 /**
