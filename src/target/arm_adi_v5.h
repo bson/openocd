@@ -136,6 +136,9 @@
 #define DP_SELECT_DPBANK 0x0000000F
 #define DP_SELECT_INVALID 0x00FFFF00 /* Reserved bits one */
 
+#define DP_APSEL_MAX        (255)
+#define DP_APSEL_INVALID    (-1)
+
 /**
  * This represents an ARM Debug Interface (v5) Access Port (AP).
  * Most common is a MEM-AP, for memory access.
@@ -286,6 +289,9 @@ struct dap_ops {
 	/** Executes all queued DAP operations but doesn't check
 	 * sticky error conditions */
 	int (*sync)(struct adiv5_dap *dap);
+
+	/** Optional; called at OpenOCD exit */
+	void (*quit)(struct adiv5_dap *dap);
 };
 
 /*

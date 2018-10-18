@@ -793,64 +793,64 @@ static void gdb_fileio_reply(struct target *target, struct connection *connectio
 	bool program_exited = false;
 
 	if (strcmp(target->fileio_info->identifier, "open") == 0)
-		sprintf(fileio_command, "F%s,%" PRIx32 "/%" PRIx32 ",%" PRIx32 ",%" PRIx32, target->fileio_info->identifier,
+		sprintf(fileio_command, "F%s,%" PRIx64 "/%" PRIx64 ",%" PRIx64 ",%" PRIx64, target->fileio_info->identifier,
 				target->fileio_info->param_1,
 				target->fileio_info->param_2,
 				target->fileio_info->param_3,
 				target->fileio_info->param_4);
 	else if (strcmp(target->fileio_info->identifier, "close") == 0)
-		sprintf(fileio_command, "F%s,%" PRIx32, target->fileio_info->identifier,
+		sprintf(fileio_command, "F%s,%" PRIx64, target->fileio_info->identifier,
 				target->fileio_info->param_1);
 	else if (strcmp(target->fileio_info->identifier, "read") == 0)
-		sprintf(fileio_command, "F%s,%" PRIx32 ",%" PRIx32 ",%" PRIx32, target->fileio_info->identifier,
+		sprintf(fileio_command, "F%s,%" PRIx64 ",%" PRIx64 ",%" PRIx64, target->fileio_info->identifier,
 				target->fileio_info->param_1,
 				target->fileio_info->param_2,
 				target->fileio_info->param_3);
 	else if (strcmp(target->fileio_info->identifier, "write") == 0)
-		sprintf(fileio_command, "F%s,%" PRIx32 ",%" PRIx32 ",%" PRIx32, target->fileio_info->identifier,
+		sprintf(fileio_command, "F%s,%" PRIx64 ",%" PRIx64 ",%" PRIx64, target->fileio_info->identifier,
 				target->fileio_info->param_1,
 				target->fileio_info->param_2,
 				target->fileio_info->param_3);
 	else if (strcmp(target->fileio_info->identifier, "lseek") == 0)
-		sprintf(fileio_command, "F%s,%" PRIx32 ",%" PRIx32 ",%" PRIx32, target->fileio_info->identifier,
+		sprintf(fileio_command, "F%s,%" PRIx64 ",%" PRIx64 ",%" PRIx64, target->fileio_info->identifier,
 				target->fileio_info->param_1,
 				target->fileio_info->param_2,
 				target->fileio_info->param_3);
 	else if (strcmp(target->fileio_info->identifier, "rename") == 0)
-		sprintf(fileio_command, "F%s,%" PRIx32 "/%" PRIx32 ",%" PRIx32 "/%" PRIx32, target->fileio_info->identifier,
+		sprintf(fileio_command, "F%s,%" PRIx64 "/%" PRIx64 ",%" PRIx64 "/%" PRIx64, target->fileio_info->identifier,
 				target->fileio_info->param_1,
 				target->fileio_info->param_2,
 				target->fileio_info->param_3,
 				target->fileio_info->param_4);
 	else if (strcmp(target->fileio_info->identifier, "unlink") == 0)
-		sprintf(fileio_command, "F%s,%" PRIx32 "/%" PRIx32, target->fileio_info->identifier,
+		sprintf(fileio_command, "F%s,%" PRIx64 "/%" PRIx64, target->fileio_info->identifier,
 				target->fileio_info->param_1,
 				target->fileio_info->param_2);
 	else if (strcmp(target->fileio_info->identifier, "stat") == 0)
-		sprintf(fileio_command, "F%s,%" PRIx32 "/%" PRIx32 ",%" PRIx32, target->fileio_info->identifier,
+		sprintf(fileio_command, "F%s,%" PRIx64 "/%" PRIx64 ",%" PRIx64, target->fileio_info->identifier,
 				target->fileio_info->param_1,
 				target->fileio_info->param_2,
 				target->fileio_info->param_3);
 	else if (strcmp(target->fileio_info->identifier, "fstat") == 0)
-		sprintf(fileio_command, "F%s,%" PRIx32 ",%" PRIx32, target->fileio_info->identifier,
+		sprintf(fileio_command, "F%s,%" PRIx64 ",%" PRIx64, target->fileio_info->identifier,
 				target->fileio_info->param_1,
 				target->fileio_info->param_2);
 	else if (strcmp(target->fileio_info->identifier, "gettimeofday") == 0)
-		sprintf(fileio_command, "F%s,%" PRIx32 ",%" PRIx32, target->fileio_info->identifier,
+		sprintf(fileio_command, "F%s,%" PRIx64 ",%" PRIx64, target->fileio_info->identifier,
 				target->fileio_info->param_1,
 				target->fileio_info->param_2);
 	else if (strcmp(target->fileio_info->identifier, "isatty") == 0)
-		sprintf(fileio_command, "F%s,%" PRIx32, target->fileio_info->identifier,
+		sprintf(fileio_command, "F%s,%" PRIx64, target->fileio_info->identifier,
 				target->fileio_info->param_1);
 	else if (strcmp(target->fileio_info->identifier, "system") == 0)
-		sprintf(fileio_command, "F%s,%" PRIx32 "/%" PRIx32, target->fileio_info->identifier,
+		sprintf(fileio_command, "F%s,%" PRIx64 "/%" PRIx64, target->fileio_info->identifier,
 				target->fileio_info->param_1,
 				target->fileio_info->param_2);
 	else if (strcmp(target->fileio_info->identifier, "exit") == 0) {
 		/* If target hits exit syscall, report to GDB the program is terminated.
 		 * In addition, let target run its own exit syscall handler. */
 		program_exited = true;
-		sprintf(fileio_command, "W%02" PRIx32, target->fileio_info->param_1);
+		sprintf(fileio_command, "W%02" PRIx64, target->fileio_info->param_1);
 	} else {
 		LOG_DEBUG("Unknown syscall: %s", target->fileio_info->identifier);
 
@@ -936,6 +936,7 @@ static int gdb_new_connection(struct connection *connection)
 
 	target = get_target_from_connection(connection);
 	connection->priv = gdb_connection;
+	connection->cmd_ctx->current_target = target;
 
 	/* initialize gdb connection information */
 	gdb_connection->buf_p = gdb_connection->buffer;
@@ -1178,8 +1179,11 @@ static int gdb_get_registers_packet(struct connection *connection,
 	if (retval != ERROR_OK)
 		return gdb_error(connection, retval);
 
-	for (i = 0; i < reg_list_size; i++)
+	for (i = 0; i < reg_list_size; i++) {
+		if (reg_list[i] == NULL || reg_list[i]->exist == false)
+			continue;
 		reg_packet_size += DIV_ROUND_UP(reg_list[i]->size, 8) * 2;
+	}
 
 	assert(reg_packet_size > 0);
 
@@ -1190,6 +1194,8 @@ static int gdb_get_registers_packet(struct connection *connection,
 	reg_packet_p = reg_packet;
 
 	for (i = 0; i < reg_list_size; i++) {
+		if (reg_list[i] == NULL || reg_list[i]->exist == false)
+			continue;
 		if (!reg_list[i]->valid) {
 			retval = reg_list[i]->type->get(reg_list[i]);
 			if (retval != ERROR_OK && gdb_report_register_access_error) {
@@ -1295,6 +1301,9 @@ static int gdb_get_register_packet(struct connection *connection,
 	LOG_DEBUG("-");
 #endif
 
+	if ((target->rtos != NULL) && (ERROR_OK == rtos_get_gdb_reg(connection, reg_num)))
+		return ERROR_OK;
+
 	retval = target_get_gdb_reg_list(target, &reg_list, &reg_list_size,
 			REG_CLASS_ALL);
 	if (retval != ERROR_OK)
@@ -1359,7 +1368,8 @@ static int gdb_set_register_packet(struct connection *connection,
 	int chars = (DIV_ROUND_UP(reg_list[reg_num]->size, 8) * 2);
 
 	if ((unsigned int)chars != strlen(separator + 1)) {
-		LOG_ERROR("gdb sent a packet with wrong register size");
+		LOG_ERROR("gdb sent %zu bits for a %d-bit register (%s)",
+				strlen(separator + 1) * 4, chars * 4, reg_list[reg_num]->name);
 		free(bin_buf);
 		return ERROR_SERVER_REMOTE_CLOSED;
 	}
@@ -2186,6 +2196,7 @@ static int gdb_generate_target_description(struct target *target, char **tdesc_o
 	int retval = ERROR_OK;
 	struct reg **reg_list = NULL;
 	int reg_list_size;
+	char const *architecture;
 	char const **features = NULL;
 	char const **arch_defined_types = NULL;
 	int feature_list_size = 0;
@@ -2226,6 +2237,12 @@ static int gdb_generate_target_description(struct target *target, char **tdesc_o
 			"<?xml version=\"1.0\"?>\n"
 			"<!DOCTYPE target SYSTEM \"gdb-target.dtd\">\n"
 			"<target version=\"1.0\">\n");
+
+	/* generate architecture element if supported by target */
+	architecture = target_get_gdb_arch(target);
+	if (architecture != NULL)
+		xml_printf(&retval, &tdesc, &pos, &size,
+				"<architecture>%s</architecture>\n", architecture);
 
 	/* generate target description according to register list */
 	if (features != NULL) {
@@ -2376,6 +2393,8 @@ static int gdb_target_description_supported(struct target *target, int *supporte
 	char const **features = NULL;
 	int feature_list_size = 0;
 
+	char const *architecture = target_get_gdb_arch(target);
+
 	retval = target_get_gdb_reg_list(target, &reg_list,
 			&reg_list_size, REG_CLASS_ALL);
 	if (retval != ERROR_OK) {
@@ -2397,7 +2416,7 @@ static int gdb_target_description_supported(struct target *target, int *supporte
 	}
 
 	if (supported) {
-		if (feature_list_size)
+		if (architecture || feature_list_size)
 			*supported = 1;
 		else
 			*supported = 0;
@@ -2706,6 +2725,7 @@ static bool gdb_handle_vcont_packet(struct connection *connection, const char *p
 
 	/* simple case, a continue packet */
 	if (parse[0] == 'c') {
+		gdb_running_type = 'c';
 		LOG_DEBUG("target %s continue", target_name(target));
 		log_add_callback(gdb_log_callback, connection);
 		retval = target_resume(target, 1, 0, 0, 0);
@@ -2732,6 +2752,7 @@ static bool gdb_handle_vcont_packet(struct connection *connection, const char *p
 
 	/* single-step or step-over-breakpoint */
 	if (parse[0] == 's') {
+		gdb_running_type = 's';
 		bool fake_step = false;
 
 		if (strncmp(parse, "s:", 2) == 0) {
@@ -3014,9 +3035,12 @@ static int gdb_v_packet(struct connection *connection,
 
 static int gdb_detach(struct connection *connection)
 {
-	target_call_event_callbacks(get_target_from_connection(connection),
-		TARGET_EVENT_GDB_DETACH);
-
+	/*
+	 * Only reply "OK" to GDB
+	 * it will close the connection and this will trigger a call to
+	 * gdb_connection_closed() that will in turn trigger the event
+	 * TARGET_EVENT_GDB_DETACH
+	 */
 	return gdb_put_packet(connection, "OK", 2);
 }
 
@@ -3366,6 +3390,8 @@ static int gdb_target_start(struct target *target, const char *port)
 	if (NULL == gdb_service)
 		return -ENOMEM;
 
+	LOG_DEBUG("starting gdb server for %s on %s", target_name(target), port);
+
 	gdb_service->target = target;
 	gdb_service->core[0] = -1;
 	gdb_service->core[1] = -1;
@@ -3391,16 +3417,36 @@ static int gdb_target_start(struct target *target, const char *port)
 
 static int gdb_target_add_one(struct target *target)
 {
+	/*  one gdb instance per smp list */
+	if ((target->smp) && (target->gdb_service))
+		return ERROR_OK;
+
+	/* skip targets that cannot handle a gdb connections (e.g. mem_ap) */
+	if (!target_supports_gdb_connection(target)) {
+		LOG_DEBUG("skip gdb server for target %s", target_name(target));
+		return ERROR_OK;
+	}
+
+	if (target->gdb_port_override) {
+		if (strcmp(target->gdb_port_override, "disabled") == 0) {
+			LOG_INFO("gdb port disabled");
+			return ERROR_OK;
+		}
+		return gdb_target_start(target, target->gdb_port_override);
+	}
+
 	if (strcmp(gdb_port, "disabled") == 0) {
 		LOG_INFO("gdb port disabled");
 		return ERROR_OK;
 	}
 
-	/*  one gdb instance per smp list */
-	if ((target->smp) && (target->gdb_service))
-		return ERROR_OK;
 	int retval = gdb_target_start(target, gdb_port_next);
 	if (retval == ERROR_OK) {
+		/* save the port number so can be queried with
+		 * $target_name cget -gdb-port
+		 */
+		target->gdb_port_override = strdup(gdb_port_next);
+
 		long portnumber;
 		/* If we can parse the port number
 		 * then we increment the port number for the next target.
@@ -3425,11 +3471,6 @@ static int gdb_target_add_one(struct target *target)
 
 int gdb_target_add_all(struct target *target)
 {
-	if (strcmp(gdb_port, "disabled") == 0) {
-		LOG_INFO("gdb server disabled");
-		return ERROR_OK;
-	}
-
 	if (NULL == target) {
 		LOG_WARNING("gdb services need one or more targets defined");
 		return ERROR_OK;
