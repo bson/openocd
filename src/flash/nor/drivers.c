@@ -29,6 +29,7 @@ extern struct flash_driver at91sam4l_flash;
 extern struct flash_driver at91sam7_flash;
 extern struct flash_driver at91samd_flash;
 extern struct flash_driver ath79_flash;
+extern struct flash_driver atsame5_flash;
 extern struct flash_driver atsamv_flash;
 extern struct flash_driver avr_flash;
 extern struct flash_driver bluenrgx_flash;
@@ -42,6 +43,7 @@ extern struct flash_driver esirisc_flash;
 extern struct flash_driver faux_flash;
 extern struct flash_driver fm3_flash;
 extern struct flash_driver fm4_flash;
+extern struct flash_driver fespi_flash;
 extern struct flash_driver jtagspi_flash;
 extern struct flash_driver kinetis_flash;
 extern struct flash_driver kinetis_ke_flash;
@@ -77,6 +79,7 @@ extern struct flash_driver str9x_flash;
 extern struct flash_driver str9xpec_flash;
 extern struct flash_driver tms470_flash;
 extern struct flash_driver virtual_flash;
+extern struct flash_driver w600_flash;
 extern struct flash_driver xcf_flash;
 extern struct flash_driver xmc1xxx_flash;
 extern struct flash_driver xmc4xxx_flash;
@@ -95,6 +98,7 @@ static struct flash_driver *flash_drivers[] = {
 	&at91sam7_flash,
 	&at91samd_flash,
 	&ath79_flash,
+	&atsame5_flash,
 	&atsamv_flash,
 	&avr_flash,
 	&bluenrgx_flash,
@@ -108,6 +112,7 @@ static struct flash_driver *flash_drivers[] = {
 	&faux_flash,
 	&fm3_flash,
 	&fm4_flash,
+	&fespi_flash,
 	&jtagspi_flash,
 	&kinetis_flash,
 	&kinetis_ke_flash,
@@ -146,6 +151,7 @@ static struct flash_driver *flash_drivers[] = {
 	&xcf_flash,
 	&xmc1xxx_flash,
 	&xmc4xxx_flash,
+	&w600_flash,
 	NULL,
 };
 

@@ -14,6 +14,7 @@ noinst_LTLIBRARIES += %D%/librtos.la
 	%D%/enetcore.c \
 	%D%/linux.c \
 	%D%/ChibiOS.c \
+	%D%/chromium-ec.c \
 	%D%/embKernel.c \
 	%D%/mqx.c \
 	%D%/uCOS-III.c \
